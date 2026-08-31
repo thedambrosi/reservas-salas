@@ -97,6 +97,9 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Pin the session time zone so `timestamptz` values round-trip as UTC
+            // regardless of the server's local time zone.
+            'timezone' => 'UTC',
         ],
 
         'sqlsrv' => [
