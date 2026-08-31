@@ -1,0 +1,332 @@
+{
+  "info": {
+    "name": "Reservas de Salas API",
+    "description": "Coleção para validar a API de reservas de salas de reunião.\n\nComo usar:\n1. Importe esta coleção no Postman.\n2. Rode `php artisan migrate:fresh --seed` e `php artisan serve`.\n3. Ajuste a variável `base_url` se necessário (padrão http://localhost:8000).\n4. Rode a request **Auth > Login (admin)** — ela salva o token automaticamente.\n5. Rode as demais requests, ou use o **Collection Runner** para rodar tudo em ordem.\n\nAs datas são calculadas dinamicamente pelo script de pré-requisição da coleção.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Datas dinâmicas sempre no futuro, para os testes de reserva.",
+          "function iso(daysAhead, hour) {",
+          "  const d = new Date();",
+          "  d.setUTCDate(d.getUTCDate() + daysAhead);",
+          "  d.setUTCHours(hour, 0, 0, 0);",
+          "  return d.toISOString().replace('.000Z', 'Z');",
+          "}",
+          "pm.collectionVariables.set('slot_start', iso(7, 14));",
+          "pm.collectionVariables.set('slot_end', iso(7, 15));",
+          "pm.collectionVariables.set('slot_overlap_start', iso(7, 14) .replace('14:00', '14:30'));",
+          "pm.collectionVariables.set('slot_overlap_end', iso(7, 15).replace('15:00', '15:30'));",
+          "pm.collectionVariables.set('slot_adjacent_start', iso(7, 15));",
+          "pm.collectionVariables.set('slot_adjacent_end', iso(7, 16));",
+          "pm.collectionVariables.set('series_start', iso(8, 9));",
+          "pm.collectionVariables.set('series_end', iso(8, 10));",
+          "pm.collectionVariables.set('filter_date', iso(7, 0).slice(0, 10));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "token", "value": "" },
+    { "key": "room_id", "value": "" },
+    { "key": "reservation_id", "value": "" },
+    { "key": "series_reservation_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Novo Usuário\",\n  \"email\": \"novo+{{$timestamp}}@example.com\",\n  \"password\": \"password-123\",\n  \"password_confirmation\": \"password-123\"\n}"
+            }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('201 Created', () => pm.response.to.have.status(201));",
+            "pm.test('retorna token e papel user', () => {",
+            "  const b = pm.response.json();",
+            "  pm.expect(b.token).to.be.a('string');",
+            "  pm.expect(b.user.role).to.eql('user');",
+            "});"
+          ] } }]
+        },
+        {
+          "name": "Login (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"password\"\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "const b = pm.response.json();",
+            "pm.collectionVariables.set('token', b.token);",
+            "pm.test('papel admin', () => pm.expect(b.user.role).to.eql('admin'));"
+          ] } }]
+        },
+        {
+          "name": "Login (credenciais inválidas)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"errada\"\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('422 Unprocessable', () => pm.response.to.have.status(422));"
+          ] } }]
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/auth/me"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Sem token (401)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/api/rooms"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Salas",
+      "item": [
+        {
+          "name": "Criar sala (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/rooms",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Sala Postman {{$timestamp}}\",\n  \"capacity\": 8\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('201 Created', () => pm.response.to.have.status(201));",
+            "pm.collectionVariables.set('room_id', pm.response.json().data.id);"
+          ] } }]
+        },
+        {
+          "name": "Criar sala inválida (422)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/rooms",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"\",\n  \"capacity\": 0\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('422 com erros de name e capacity', () => {",
+            "  pm.response.to.have.status(422);",
+            "  const e = pm.response.json().errors;",
+            "  pm.expect(e).to.have.property('name');",
+            "  pm.expect(e).to.have.property('capacity');",
+            "});"
+          ] } }]
+        },
+        {
+          "name": "Listar salas (filtro capacidade)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/rooms?min_capacity=5"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Detalhe da sala",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/rooms/{{room_id}}"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Reservas",
+      "item": [
+        {
+          "name": "1. Criar reserva (201)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations",
+            "body": { "mode": "raw", "raw": "{\n  \"room_id\": {{room_id}},\n  \"starts_at\": \"{{slot_start}}\",\n  \"ends_at\": \"{{slot_end}}\"\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('201 Created', () => pm.response.to.have.status(201));",
+            "const d = pm.response.json().data;",
+            "pm.collectionVariables.set('reservation_id', d.id);",
+            "pm.test('confirmada e não recorrente', () => {",
+            "  pm.expect(d.status).to.eql('confirmed');",
+            "  pm.expect(d.is_recurring).to.be.false;",
+            "});"
+          ] } }]
+        },
+        {
+          "name": "2. Reserva sobreposta (422 + conflicts)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations",
+            "body": { "mode": "raw", "raw": "{\n  \"room_id\": {{room_id}},\n  \"starts_at\": \"{{slot_overlap_start}}\",\n  \"ends_at\": \"{{slot_overlap_end}}\"\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('422 Unprocessable', () => pm.response.to.have.status(422));",
+            "pm.test('lista o conflito', () => {",
+            "  const c = pm.response.json().conflicts;",
+            "  pm.expect(c).to.be.an('array').that.is.not.empty;",
+            "  pm.expect(c[0].conflicting_reservation_id).to.eql(pm.collectionVariables.get('reservation_id'));",
+            "});"
+          ] } }]
+        },
+        {
+          "name": "3. Reserva encostada (201 - back to back)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations",
+            "body": { "mode": "raw", "raw": "{\n  \"room_id\": {{room_id}},\n  \"starts_at\": \"{{slot_adjacent_start}}\",\n  \"ends_at\": \"{{slot_adjacent_end}}\"\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('201 Created (fim == início não conflita)', () => pm.response.to.have.status(201));"
+          ] } }]
+        },
+        {
+          "name": "4. Reserva recorrente semanal x4 (201)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations",
+            "body": { "mode": "raw", "raw": "{\n  \"room_id\": {{room_id}},\n  \"starts_at\": \"{{series_start}}\",\n  \"ends_at\": \"{{series_end}}\",\n  \"recurrence\": { \"frequency\": \"weekly\", \"interval\": 1, \"count\": 4 }\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('201 Created', () => pm.response.to.have.status(201));",
+            "const d = pm.response.json().data;",
+            "pm.test('4 ocorrências materializadas', () => {",
+            "  pm.expect(d.occurrences).to.eql(4);",
+            "  pm.expect(d.reservations).to.have.lengthOf(4);",
+            "});",
+            "pm.collectionVariables.set('series_reservation_id', d.reservations[3].id);"
+          ] } }]
+        },
+        {
+          "name": "5. Recorrente com 1 ocorrência em conflito (422, nada gravado)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations",
+            "body": { "mode": "raw", "raw": "{\n  \"room_id\": {{room_id}},\n  \"starts_at\": \"{{series_start}}\",\n  \"ends_at\": \"{{series_end}}\",\n  \"recurrence\": { \"frequency\": \"weekly\", \"count\": 6 }\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('422 - a série inteira é rejeitada', () => pm.response.to.have.status(422));",
+            "pm.test('conflicts não vazio', () => pm.expect(pm.response.json().conflicts).to.not.be.empty);"
+          ] } }]
+        },
+        {
+          "name": "6. Listar por sala + data",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations?room_id={{room_id}}&date={{filter_date}}"
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('retorna itens da sala', () => pm.expect(pm.response.json().data.length).to.be.above(0));"
+          ] } }]
+        },
+        {
+          "name": "7. Cancelar ocorrência (200, não apaga)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations/{{reservation_id}}/cancel",
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Reunião remarcada\"\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('status cancelado + auditoria', () => {",
+            "  const d = pm.response.json().data;",
+            "  pm.expect(d.status).to.eql('cancelled');",
+            "  pm.expect(d.cancellation.reason).to.eql('Reunião remarcada');",
+            "});"
+          ] } }]
+        },
+        {
+          "name": "8. Cancelar de novo (409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations/{{reservation_id}}/cancel",
+            "body": { "mode": "raw", "raw": "{}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+          ] } }]
+        },
+        {
+          "name": "9. Cancelar série inteira (200)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{base_url}}/api/reservations/{{series_reservation_id}}/cancel",
+            "body": { "mode": "raw", "raw": "{\n  \"scope\": \"series\"\n}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('retorna a contagem de canceladas', () => pm.expect(pm.response.json().cancelled_count).to.be.above(0));"
+          ] } }]
+        },
+        {
+          "name": "10. Outro usuário não pode cancelar (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "url": "{{base_url}}/api/reservations/{{reservation_id}}/cancel",
+            "body": { "mode": "raw", "raw": "{}" }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "exec": [
+                "// Loga como o usuário comum e guarda o token só desta request.",
+                "pm.sendRequest({",
+                "  url: pm.collectionVariables.get('base_url') + '/api/auth/login',",
+                "  method: 'POST',",
+                "  header: { 'Accept': 'application/json', 'Content-Type': 'application/json' },",
+                "  body: { mode: 'raw', raw: JSON.stringify({ email: 'user@example.com', password: 'password' }) }",
+                "}, (err, res) => pm.collectionVariables.set('token_user', res.json().token));"
+              ] }
+            },
+            { "listen": "test", "script": { "exec": [
+              "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+            ] } }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -51,6 +51,15 @@ exercitar também a *exclusion constraint* descrita abaixo.
 
 ---
 
+## Testar com Postman
+
+Importe [`docs/reservas-salas.postman_collection.json`](docs/reservas-salas.postman_collection.json)
+no Postman. Com a API rodando (`php artisan migrate:fresh --seed` + `php artisan serve`),
+rode **Auth > Login (admin)** (salva o token sozinho) e depois as pastas **Salas** e
+**Reservas** — ou use o *Collection Runner* para rodar a coleção inteira em ordem. Cada
+request já traz asserções (`Tests`) cobrindo os cenários do enunciado: conflito de
+horário, reservas encostadas, recorrência, cancelamento e controle de acesso.
+
 ## Autenticação
 
 ```bash
